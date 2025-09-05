@@ -16,16 +16,20 @@
   
 -------------------------------------------------------------------------------------*/
 
-#define AVGSAMPLES 20000
+// ENDRING: Laget en unik og større makro for bufferstørrelsen.
+#define AVERAGE_NUMSAMPLES 160001
 
 class AVERAGEOBJ : public BASE_CL
 {
 	protected:
 		float accumulator;
-		float samples[AVGSAMPLES];
+        // ENDRING: Bruker den nye makroen.
+		float samples[AVERAGE_NUMSAMPLES];
         long interval, writepos, added;
 
 	public:
+        // ENDRING: Ny variabel for å holde på intervallet i sekunder.
+        int interval_seconds;
 
 	AVERAGEOBJ(int num);
 
@@ -49,5 +53,6 @@ class AVERAGEOBJ : public BASE_CL
     
     private:
     
-    void change_interval(int newinterval);
+    // ENDRING: Endret funksjonen til å ta imot sekunder.
+    void change_interval_seconds(int newinterval_seconds);
 };
