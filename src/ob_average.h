@@ -16,20 +16,26 @@
   
 -------------------------------------------------------------------------------------*/
 
-// ENDRING: Laget en unik og større makro for bufferstørrelsen.
 #define AVERAGE_NUMSAMPLES 160001
+
+// ENDRING: Lagt til en enum for å gjøre modusen mer lesbar.
+enum AverageMode {
+    MODE_SECONDS,
+    MODE_EVENTS
+};
 
 class AVERAGEOBJ : public BASE_CL
 {
 	protected:
 		float accumulator;
-        // ENDRING: Bruker den nye makroen.
 		float samples[AVERAGE_NUMSAMPLES];
-        long interval, writepos, added;
+        long interval; // Dette er den *kalkulerte* verdien (i samples eller antall)
+        long writepos, added;
 
 	public:
-        // ENDRING: Ny variabel for å holde på intervallet i sekunder.
-        int interval_seconds;
+        // ENDRING: Nye variabler for å håndtere de to modusene.
+        int mode;               // Vil lagre enten MODE_SECONDS eller MODE_EVENTS.
+        int interval_setting;   // Verdien fra slideren (f.eks. 60 sekunder eller 10 hendelser).
 
 	AVERAGEOBJ(int num);
 
@@ -53,6 +59,6 @@ class AVERAGEOBJ : public BASE_CL
     
     private:
     
-    // ENDRING: Endret funksjonen til å ta imot sekunder.
-    void change_interval_seconds(int newinterval_seconds);
+    // ENDRING: En ny, mer generell funksjon for å oppdatere innstillingene.
+    void update_settings(int new_value, int new_mode);
 };

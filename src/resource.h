@@ -995,6 +995,10 @@
 #define ID_SOURCE_LSL                   32970
 #define IDC_STATIC                      -1
 
+#define IDC_RADIO_SECONDS               1101
+#define IDC_RADIO_EVENTS                1102
+#define IDC_INTERVAL_UNITS_LABEL        1103
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED

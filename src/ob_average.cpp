@@ -19,8 +19,12 @@
 #include "brainBay.h"
 #include "ob_average.h"
 #include <iostream>
+#include <tchar.h>
 
 using namespace std;
+
+// Prototyp for hjelpefunksjon vi lager lenger nede i filen.
+void UpdateAverageDialogUI(HWND hDlg, AVERAGEOBJ* st);
 
 AVERAGEOBJ::AVERAGEOBJ(int num) : BASE_CL()
 {
@@ -30,19 +34,15 @@ AVERAGEOBJ::AVERAGEOBJ(int num) : BASE_CL()
     strcpy(in_ports[0].in_name,"in");
 	strcpy(out_ports[0].out_name,"out");
     accumulator = 0.0;
-    // ENDRING: Bruker den nye makroen.
     for (int i = 0; i < AVERAGE_NUMSAMPLES; i++)
     {
     	samples[i] = 0.0;
     }
     
-    // ENDRING: Sett standard til 5 sekunder og kalkuler antall samples.
-    interval_seconds = 5;
-    if (TTY.samplingrate > 0) {
-        interval = interval_seconds * TTY.samplingrate;
-    } else {
-        interval = interval_seconds * 256; // Fallback
-    }
+    // ENDRING: Sett standardmodus og verdier.
+    mode = MODE_SECONDS; // Standard til tidsbasert.
+    interval_setting = 5;
+    update_settings(interval_setting, mode); // Kall den nye funksjonen for å kalkulere 'interval'.
 
     writepos = 0;
     added = 0;
@@ -73,21 +73,18 @@ void AVERAGEOBJ::make_dialog(void)
 void AVERAGEOBJ::load(HANDLE hFile) 
 {
    load_object_basics(this);
-   // ENDRING: Last inn interval_seconds i stedet for interval.
-   load_property("interval_seconds",P_INT,&interval_seconds);
-   // ENDRING: Rekalkuler interval i samples etter lasting.
-   if (TTY.samplingrate > 0) {
-	   interval = interval_seconds * TTY.samplingrate;
-   } else {
-	   interval = interval_seconds * 256; // Fallback
-   }
+   // ENDRING: Last inn både modus og innstilling.
+   load_property("mode", P_INT, &mode);
+   load_property("interval_setting", P_INT, &interval_setting);
+   update_settings(interval_setting, mode); // Rekalkuler 'interval' etter lasting.
 }
 
 void AVERAGEOBJ::save(HANDLE hFile) 
 {
 	save_object_basics(hFile,this);
-    // ENDRING: Lagre interval_seconds i stedet for interval.
-    save_property(hFile,"interval_seconds",P_INT,&interval_seconds);
+    // ENDRING: Lagre både modus og innstilling.
+    save_property(hFile,"mode", P_INT, &mode);
+    save_property(hFile,"interval_setting", P_INT, &interval_setting);
 }
 	
 void AVERAGEOBJ::incoming_data(int port, float value)
@@ -97,20 +94,18 @@ void AVERAGEOBJ::incoming_data(int port, float value)
    		accumulator += value;
 		added++;
 
-		if (interval) 
+		if (interval > 0) // Sjekk for > 0 for å unngå feil
 		{
 			samples[writepos] = value;
 			if (added > interval)
 			{
 				int oldest = writepos - interval;
 				if (oldest < 0)
-                    // ENDRING: Bruker den nye makroen.
 	    			oldest += AVERAGE_NUMSAMPLES;
 			    accumulator -= samples[oldest];
 				added = interval;
 			}
 			writepos++;
-            // ENDRING: Bruker den nye makroen.
 			if (writepos >= AVERAGE_NUMSAMPLES)
     			writepos = 0;
 		}
@@ -127,21 +122,30 @@ void AVERAGEOBJ::work(void)
 	}
 }
 
-// ENDRING: Implementerer den nye funksjonen.
-void AVERAGEOBJ::change_interval_seconds(int newinterval_seconds)
+// ENDRING: Implementerer den nye, sentrale logikk-funksjonen.
+void AVERAGEOBJ::update_settings(int new_value, int new_mode)
 {
-	interval_seconds = newinterval_seconds;
+    mode = new_mode;
+    interval_setting = new_value;
 
-    // Beregn nytt intervall i samples basert på global samplingrate.
-    if (TTY.samplingrate > 0) {
-        interval = interval_seconds * TTY.samplingrate;
-    } else {
-        interval = interval_seconds * 256; // Fallback
+    if (mode == MODE_SECONDS) {
+        // Kalkuler intervall i samples.
+        if (TTY.samplingrate > 0) {
+            interval = interval_setting * TTY.samplingrate;
+        } else {
+            interval = interval_setting * 256; // Fallback
+        }
+    } else { // mode == MODE_EVENTS
+        // Intervallet er bare antall hendelser.
+        interval = interval_setting;
     }
 
-    // Sikkerhetssjekk for å unngå buffer overflow.
+    // Sikkerhetssjekk.
     if (interval >= AVERAGE_NUMSAMPLES) {
         interval = AVERAGE_NUMSAMPLES - 1;
+    }
+    if (interval < 1) { // Sørg for at intervallet er minst 1
+        interval = 1;
     }
 
 	added = 0;
@@ -150,6 +154,7 @@ void AVERAGEOBJ::change_interval_seconds(int newinterval_seconds)
 
 AVERAGEOBJ::~AVERAGEOBJ() {}
 
+// ENDRING: Dialog-handleren er kraftig modifisert.
 LRESULT CALLBACK AverageDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static bool init;
@@ -161,28 +166,30 @@ LRESULT CALLBACK AverageDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARA
 	switch( message )
 	{
 		case WM_INITDIALOG:
-		{
-				SCROLLINFO lpsi;
-			    lpsi.cbSize=sizeof(SCROLLINFO);
-				lpsi.fMask=SIF_RANGE|SIF_POS;
-                // ENDRING: Sett sliderens rekkevidde til sekunder, f.eks. 1 til 300.
-				lpsi.nMin=1; lpsi.nMax=300;
-				SetScrollInfo(GetDlgItem(hDlg,IDC_AVERAGEINTERVALBAR),SB_CTL,&lpsi, TRUE);
-				
 				init = true;
-
-                // ENDRING: Bruk interval_seconds for å sette slider og tekstboks.
-				SetScrollPos(GetDlgItem(hDlg,IDC_AVERAGEINTERVALBAR), SB_CTL,st->interval_seconds, TRUE);
-				SetDlgItemInt(hDlg, IDC_AVERAGEINTERVAL, st->interval_seconds, FALSE);
-                
+                // Sett radioknapp basert på lagret modus.
+				CheckRadioButton(hDlg, IDC_RADIO_SECONDS, IDC_RADIO_EVENTS, (st->mode == MODE_SECONDS) ? IDC_RADIO_SECONDS : IDC_RADIO_EVENTS);
+                // Oppdater resten av UI-et (slider, tekst, etc.).
+                UpdateAverageDialogUI(hDlg, st);
 				init = false;
 				break;		
-		}
 		case WM_CLOSE:
 			    EndDialog(hDlg, LOWORD(wParam));
 				return TRUE;
 			break;
 		case WM_COMMAND:
+            // Håndter klikk på radioknappene.
+            switch(LOWORD(wParam))
+            {
+                case IDC_RADIO_SECONDS:
+                    st->update_settings(st->interval_setting, MODE_SECONDS);
+                    UpdateAverageDialogUI(hDlg, st);
+                    break;
+                case IDC_RADIO_EVENTS:
+                    st->update_settings(st->interval_setting, MODE_EVENTS);
+                    UpdateAverageDialogUI(hDlg, st);
+                    break;
+            }
 			return TRUE;
 			break;
 		case WM_HSCROLL:
@@ -192,9 +199,9 @@ LRESULT CALLBACK AverageDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARA
 			{   
 				if (lParam == (long) GetDlgItem(hDlg,IDC_AVERAGEINTERVALBAR))  
 				{
-                    // ENDRING: nNewPos er nå i sekunder. Oppdater tekstboks og kall den nye funksjonen.
 					SetDlgItemInt(hDlg, IDC_AVERAGEINTERVAL, nNewPos, TRUE);
-                    st->change_interval_seconds(nNewPos);
+                    // Oppdater innstillingene med den nye verdien fra slideren.
+                    st->update_settings(nNewPos, st->mode);
 				}
 			}
 			break;
@@ -205,4 +212,28 @@ LRESULT CALLBACK AverageDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARA
 		return(TRUE);
 	}
 	return FALSE;
+}
+
+// ENDRING: Ny hjelpefunksjon for å oppdatere UI-elementene.
+void UpdateAverageDialogUI(HWND hDlg, AVERAGEOBJ* st)
+{
+    SCROLLINFO lpsi;
+    lpsi.cbSize = sizeof(SCROLLINFO);
+    lpsi.fMask = SIF_RANGE | SIF_POS;
+
+    if (st->mode == MODE_SECONDS) {
+        // Denne vil nå fungere fordi _T er definert
+        SetDlgItemText(hDlg, IDC_INTERVAL_UNITS_LABEL, _T("seconds"));
+        lpsi.nMin = 1;
+        lpsi.nMax = 300;
+    } else { // mode == MODE_EVENTS
+        // Denne vil nå fungere fordi _T er definert
+        SetDlgItemText(hDlg, IDC_INTERVAL_UNITS_LABEL, _T("events"));
+        lpsi.nMin = 1;
+        lpsi.nMax = 1000; 
+    }
+    
+    lpsi.nPos = st->interval_setting;
+    SetScrollInfo(GetDlgItem(hDlg, IDC_AVERAGEINTERVALBAR), SB_CTL, &lpsi, TRUE);
+    SetDlgItemInt(hDlg, IDC_AVERAGEINTERVAL, st->interval_setting, FALSE);
 }
