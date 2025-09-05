@@ -21,7 +21,6 @@
 #include "ob_deviation.h"
 
 
-
 LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static bool init;
@@ -33,20 +32,23 @@ LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPA
 	switch( message )
 	{
 		case WM_INITDIALOG:
-
+		{
 				SCROLLINFO lpsi;
 			    lpsi.cbSize=sizeof(SCROLLINFO);
 				lpsi.fMask=SIF_RANGE|SIF_POS;
-				lpsi.nMin=1; lpsi.nMax=NUMSAMPLES - 1;
+				// ENDRING: Sett sliderens rekkevidde til sekunder, f.eks. 1 til 300 (5 minutter)
+				lpsi.nMin=1; lpsi.nMax= 300;
 				SetScrollInfo(GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR),SB_CTL,&lpsi, TRUE);
 				
 				init = true;
 
-				SetScrollPos(GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR), SB_CTL,st->interval, TRUE);
-				SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, st->interval, FALSE);
+				// ENDRING: Bruk interval_seconds for å sette slider og tekstboks
+				SetScrollPos(GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR), SB_CTL,st->interval_seconds, TRUE);
+				SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, st->interval_seconds, FALSE);
                 
 				init = false;
 				break;		
+		}
 		case WM_CLOSE:
 			    EndDialog(hDlg, LOWORD(wParam));
 				return TRUE;
@@ -61,8 +63,9 @@ LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPA
 			{   
 				if (lParam == (long) GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR))  
 				{
+					// ENDRING: nNewPos er nå i sekunder. Oppdater tekstboks og kall den nye funksjonen.
 					SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, nNewPos, TRUE);
-                    st->change_interval(nNewPos);
+                    st->change_interval_seconds(nNewPos);
 				}
 			}
 			break;
@@ -84,11 +87,21 @@ DEVIATIONOBJ::DEVIATIONOBJ(int num) : BASE_CL()
 	strcpy(out_ports[0].out_name,"dev");
 	strcpy(out_ports[1].out_name,"mean");
     meanaccu = 0.0; devaccu=0.0;
-    for (int i = 0; i < NUMSAMPLES; i++)
+    for (int i = 0; i < DEVIATION_NUMSAMPLES; i++)
     {
     	samples[i] = 0.0;
+		squares[i] = 0.0; // ENDRING: Bør også initialisere squares-arrayen
     }
-    interval = 256;
+
+    // ENDRING: Sett standard til 60 sekunder og kalkuler antall samples
+    interval_seconds = 60;
+	// Sørg for at TTY.samplingrate har en fornuftig verdi ved oppstart
+	if (TTY.samplingrate > 0) {
+		interval = interval_seconds * TTY.samplingrate;
+	} else {
+		interval = interval_seconds * 256; // Fallback til 256 Hz hvis TTY.samplingrate er 0
+	}
+	
     writepos = 0;
     added = 0;
 }
@@ -101,17 +114,27 @@ void DEVIATIONOBJ::make_dialog(void)
 void DEVIATIONOBJ::load(HANDLE hFile) 
 {
    load_object_basics(this);
-   load_property("interval",P_INT,&interval);
+   // ENDRING: Last inn interval_seconds i stedet for interval
+   load_property("interval_seconds",P_INT,&interval_seconds);
+   // ENDRING: Rekalkuler interval i samples etter lasting
+   if (TTY.samplingrate > 0) {
+	   interval = interval_seconds * TTY.samplingrate;
+   } else {
+	   interval = interval_seconds * 256; // Fallback
+   }
 }
 
 void DEVIATIONOBJ::save(HANDLE hFile) 
 {
 	save_object_basics(hFile,this);
-    save_property(hFile,"interval",P_INT,&interval);
+	// ENDRING: Lagre interval_seconds i stedet for interval
+    save_property(hFile,"interval_seconds",P_INT,&interval_seconds);
 }
 	
 void DEVIATIONOBJ::incoming_data(int port, float value)
 {
+	// Denne funksjonen trenger ingen endringer, da den bruker 'interval' (i samples)
+	// som nå blir korrekt satt av change_interval_seconds()
 	if (value!=INVALID_VALUE)
 	{
 		samples[writepos] = value;
@@ -121,20 +144,30 @@ void DEVIATIONOBJ::incoming_data(int port, float value)
 		{
 		    int oldest = writepos - interval;
 			if (oldest < 0)
-	    		oldest += NUMSAMPLES;
+	    		oldest += DEVIATION_NUMSAMPLES;
 		    meanaccu -= samples[oldest];
 			devaccu -=  squares[oldest];
 			added = interval;
 		}
-		mean=meanaccu / added;
-
+		
+		// Unngå deling på null hvis 'added' skulle være 0
+		if (added > 0) {
+			mean = meanaccu / added;
+		} else {
+			mean = 0.0f;
+		}
+		
 		squares[writepos]=(value-mean)*(value-mean);
 		devaccu += squares[writepos];
 
-		deviation = (float) sqrt ((double) (devaccu / added));
+		if (added > 0) {
+			deviation = (float) sqrt ((double) (devaccu / added));
+		} else {
+			deviation = 0.0f;
+		}
 
 		writepos++;
-		if (writepos >= NUMSAMPLES)
+		if (writepos >= DEVIATION_NUMSAMPLES)
     		writepos = 0;
 	}
 }
@@ -146,9 +179,24 @@ void DEVIATIONOBJ::work(void)
 	
 }
 
-void DEVIATIONOBJ::change_interval(int newinterval)
+// ENDRING: Implementerer den nye funksjonen
+void DEVIATIONOBJ::change_interval_seconds(int newinterval_seconds)
 {
-	interval = newinterval;
+	interval_seconds = newinterval_seconds;
+
+	// Beregn nytt intervall i samples basert på global TTY.samplingrate
+	if (TTY.samplingrate > 0) {
+		interval = interval_seconds * TTY.samplingrate;
+	} else {
+		interval = interval_seconds * 256; // Bruk en fornuftig standardverdi hvis TTY.samplingrate ikke er satt
+	}
+
+	// Sikkerhetssjekk for å unngå buffer overflow
+	if (interval >= DEVIATION_NUMSAMPLES) {
+		interval = DEVIATION_NUMSAMPLES - 1;
+	}
+	
+	// Reset kalkulasjonen
 	added = 0;
 	meanaccu = 0;
 	devaccu=0;

@@ -17,19 +17,22 @@
 
 #include "brainBay.h"
 
-#define NUMSAMPLES 1001
+// ENDRING: Økt bufferstørrelsen betraktelig for å støtte lange tidsperioder.
+// 5 minutter ved 512Hz = 300s * 512Hz = 153600 samples. Vi runder opp.
+#define DEVIATION_NUMSAMPLES 160001
 
 class DEVIATIONOBJ : public BASE_CL
 {
 	protected:
 		float meanaccu,devaccu;
-		float samples[NUMSAMPLES];
-		float squares[NUMSAMPLES];
+		float samples[DEVIATION_NUMSAMPLES];
+		float squares[DEVIATION_NUMSAMPLES];
 		float mean,deviation;
         int writepos, added;
 
 	public:
-		int interval; 
+		int interval; // Dette vil nå være antall SAMPLES, kalkulert fra interval_seconds
+		int interval_seconds; // ENDRING: Ny variabel for å holde på intervallet i sekunder
 
 	DEVIATIONOBJ(int num);
 
@@ -43,7 +46,8 @@ class DEVIATIONOBJ : public BASE_CL
 	
 	void work(void);
 
-	void change_interval(int newinterval);
+    // ENDRING: Endret funksjonen til å ta imot sekunder
+	void change_interval_seconds(int newinterval_seconds);
 
 	~DEVIATIONOBJ();
 
