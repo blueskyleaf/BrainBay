@@ -45,7 +45,10 @@ AVERAGEOBJ::AVERAGEOBJ(int num) : BASE_CL()
     update_settings(interval_setting, mode); // Kall den nye funksjonen for å kalkulere 'interval'.
 
     writepos = 0;
-    added = 0;
+    added = 0;    
+	
+	// ENDRING: Initialiser last_value.
+    last_value = INVALID_VALUE; 
 }
 	
 void AVERAGEOBJ::session_start(void)
@@ -89,26 +92,62 @@ void AVERAGEOBJ::save(HANDLE hFile)
 	
 void AVERAGEOBJ::incoming_data(int port, float value)
 {
-	if (value!=INVALID_VALUE)
+	if (mode == MODE_SECONDS)
 	{
-   		accumulator += value;
+		// TIDSBASERT LOGIKK (fungerer som før)
+		// Vi ignorerer INVALID_VALUE for å unngå å forurense gjennomsnittet.
+		if (value == INVALID_VALUE) return;
+
+		accumulator += value;
 		added++;
 
-		if (interval > 0) // Sjekk for > 0 for å unngå feil
+		if (interval > 0)
 		{
 			samples[writepos] = value;
 			if (added > interval)
 			{
 				int oldest = writepos - interval;
 				if (oldest < 0)
-	    			oldest += AVERAGE_NUMSAMPLES;
-			    accumulator -= samples[oldest];
+					oldest += AVERAGE_NUMSAMPLES;
+				accumulator -= samples[oldest];
 				added = interval;
 			}
 			writepos++;
 			if (writepos >= AVERAGE_NUMSAMPLES)
-    			writepos = 0;
+				writepos = 0;
 		}
+	}
+	else // mode == MODE_EVENTS
+	{
+		// HENDELSESBASERT LOGIKK ("Edge Detection")
+		// En ny hendelse er en overgang fra INVALID_VALUE til en gyldig verdi.
+		if (value != INVALID_VALUE && last_value == INVALID_VALUE)
+		{
+			// EN NY PAKKE ER MOTATT!
+			
+			// 1. Hvis bufferen er full, trekk fra den eldste verdien.
+			if (added >= interval) {
+				accumulator -= samples[writepos];
+			}
+
+			// 2. Legg til den nye verdien.
+			accumulator += value;
+			samples[writepos] = value;
+
+			// 3. Oppdater telleren (opp til maks).
+			if (added < interval) {
+				added++;
+			}
+
+			// 4. Flytt skrivepekeren.
+			writepos++;
+			if (writepos >= interval) {
+				writepos = 0;
+			}
+		}
+		
+		// 5. Husk alltid den siste verdien for neste sammenligning.
+		last_value = value;
 	}
 }
 	
@@ -150,6 +189,10 @@ void AVERAGEOBJ::update_settings(int new_value, int new_mode)
 
 	added = 0;
 	accumulator = 0;
+	
+	// ENDRING: Nullstill tilstanden når innstillingene endres.
+    last_value = INVALID_VALUE; 
+    writepos = 0;
 }
 
 AVERAGEOBJ::~AVERAGEOBJ() {}

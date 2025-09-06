@@ -998,6 +998,9 @@
 #define IDC_RADIO_SECONDS               1101
 #define IDC_RADIO_EVENTS                1102
 #define IDC_INTERVAL_UNITS_LABEL        1103
+#define IDC_RADIO_SECONDS_DEV           1104
+#define IDC_RADIO_EVENTS_DEV            1105
+#define IDC_INTERVAL_UNITS_LABEL_DEV    1106
 
 // Next default values for new objects
 // 

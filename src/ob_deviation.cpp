@@ -19,8 +19,12 @@
 
 #include "brainBay.h"
 #include "ob_deviation.h"
+#include <tchar.h> // Inkluder for _T() makroen
 
+// Prototyp for hjelpefunksjon
+void UpdateDeviationDialogUI(HWND hDlg, DEVIATIONOBJ* st);
 
+// ENDRING: Dialog-handleren er kraftig modifisert.
 LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static bool init;
@@ -32,28 +36,27 @@ LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPA
 	switch( message )
 	{
 		case WM_INITDIALOG:
-		{
-				SCROLLINFO lpsi;
-			    lpsi.cbSize=sizeof(SCROLLINFO);
-				lpsi.fMask=SIF_RANGE|SIF_POS;
-				// ENDRING: Sett sliderens rekkevidde til sekunder, f.eks. 1 til 300 (5 minutter)
-				lpsi.nMin=1; lpsi.nMax= 300;
-				SetScrollInfo(GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR),SB_CTL,&lpsi, TRUE);
-				
 				init = true;
-
-				// ENDRING: Bruk interval_seconds for å sette slider og tekstboks
-				SetScrollPos(GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR), SB_CTL,st->interval_seconds, TRUE);
-				SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, st->interval_seconds, FALSE);
-                
+				CheckRadioButton(hDlg, IDC_RADIO_SECONDS_DEV, IDC_RADIO_EVENTS_DEV, (st->mode == MODE_SECONDS_DEV) ? IDC_RADIO_SECONDS_DEV : IDC_RADIO_EVENTS_DEV);
+                UpdateDeviationDialogUI(hDlg, st);
 				init = false;
 				break;		
-		}
 		case WM_CLOSE:
 			    EndDialog(hDlg, LOWORD(wParam));
 				return TRUE;
 			break;
 		case WM_COMMAND:
+            switch(LOWORD(wParam))
+            {
+                case IDC_RADIO_SECONDS_DEV:
+                    st->update_settings(st->interval_setting, MODE_SECONDS_DEV);
+                    UpdateDeviationDialogUI(hDlg, st);
+                    break;
+                case IDC_RADIO_EVENTS_DEV:
+                    st->update_settings(st->interval_setting, MODE_EVENTS_DEV);
+                    UpdateDeviationDialogUI(hDlg, st);
+                    break;
+            }
 			return TRUE;
 			break;
 		case WM_HSCROLL:
@@ -63,9 +66,8 @@ LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPA
 			{   
 				if (lParam == (long) GetDlgItem(hDlg,IDC_DEVIATIONINTERVALBAR))  
 				{
-					// ENDRING: nNewPos er nå i sekunder. Oppdater tekstboks og kall den nye funksjonen.
 					SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, nNewPos, TRUE);
-                    st->change_interval_seconds(nNewPos);
+                    st->update_settings(nNewPos, st->mode);
 				}
 			}
 			break;
@@ -90,20 +92,17 @@ DEVIATIONOBJ::DEVIATIONOBJ(int num) : BASE_CL()
     for (int i = 0; i < DEVIATION_NUMSAMPLES; i++)
     {
     	samples[i] = 0.0;
-		squares[i] = 0.0; // ENDRING: Bør også initialisere squares-arrayen
+		squares[i] = 0.0;
     }
 
-    // ENDRING: Sett standard til 60 sekunder og kalkuler antall samples
-    interval_seconds = 60;
-	// Sørg for at TTY.samplingrate har en fornuftig verdi ved oppstart
-	if (TTY.samplingrate > 0) {
-		interval = interval_seconds * TTY.samplingrate;
-	} else {
-		interval = interval_seconds * 256; // Fallback til 256 Hz hvis TTY.samplingrate er 0
-	}
-	
+    // ENDRING: Sett standardmodus og verdier.
+    mode = MODE_SECONDS_DEV;
+    interval_setting = 60; // God standard for HRV
+    update_settings(interval_setting, mode);
+
     writepos = 0;
     added = 0;
+    last_value = INVALID_VALUE;
 }
 	
 void DEVIATIONOBJ::make_dialog(void)
@@ -114,92 +113,134 @@ void DEVIATIONOBJ::make_dialog(void)
 void DEVIATIONOBJ::load(HANDLE hFile) 
 {
    load_object_basics(this);
-   // ENDRING: Last inn interval_seconds i stedet for interval
-   load_property("interval_seconds",P_INT,&interval_seconds);
-   // ENDRING: Rekalkuler interval i samples etter lasting
-   if (TTY.samplingrate > 0) {
-	   interval = interval_seconds * TTY.samplingrate;
-   } else {
-	   interval = interval_seconds * 256; // Fallback
-   }
+   // ENDRING: Last inn både modus og innstilling.
+   load_property("mode", P_INT, &mode);
+   load_property("interval_setting", P_INT, &interval_setting);
+   update_settings(interval_setting, mode);
 }
 
 void DEVIATIONOBJ::save(HANDLE hFile) 
 {
 	save_object_basics(hFile,this);
-	// ENDRING: Lagre interval_seconds i stedet for interval
-    save_property(hFile,"interval_seconds",P_INT,&interval_seconds);
+    // ENDRING: Lagre både modus og innstilling.
+    save_property(hFile,"mode", P_INT, &mode);
+    save_property(hFile,"interval_setting", P_INT, &interval_setting);
 }
+
 	
 void DEVIATIONOBJ::incoming_data(int port, float value)
 {
-	// Denne funksjonen trenger ingen endringer, da den bruker 'interval' (i samples)
-	// som nå blir korrekt satt av change_interval_seconds()
-	if (value!=INVALID_VALUE)
+	bool new_event = false;
+
+	if (mode == MODE_SECONDS_DEV) {
+		if (value != INVALID_VALUE) {
+			new_event = true;
+		}
+	} else { // mode == MODE_EVENTS_DEV
+		if (value != INVALID_VALUE && last_value == INVALID_VALUE) {
+			new_event = true;
+		}
+	}
+	
+	// Kjør kalkulasjonen kun hvis en gyldig hendelse har skjedd.
+	if (new_event)
 	{
-		samples[writepos] = value;
-   		meanaccu += value;
-		added++;
-		if (added > interval)
+		// Denne logikkblokken er den originale, velprøvde logikken.
+		// Den fungerer for begge moduser, så lenge den kun kjøres én gang per hendelse.
+		
+		// 1. Hvis bufferen er full, fjern de eldste dataene.
+		if (added >= interval)
 		{
 		    int oldest = writepos - interval;
 			if (oldest < 0)
 	    		oldest += DEVIATION_NUMSAMPLES;
 		    meanaccu -= samples[oldest];
-			devaccu -=  squares[oldest];
-			added = interval;
-		}
-		
-		// Unngå deling på null hvis 'added' skulle være 0
-		if (added > 0) {
-			mean = meanaccu / added;
+			devaccu -= squares[oldest];
 		} else {
-			mean = 0.0f;
+			added++;
 		}
 		
-		squares[writepos]=(value-mean)*(value-mean);
+		// 2. Legg til den nye verdien.
+		samples[writepos] = value;
+   		meanaccu += value;
+		
+		// 3. Rekalkuler gjennomsnitt.
+		mean = meanaccu / added;
+
+		// 4. Rekalkuler og legg til den nye kvadratsummen.
+		squares[writepos] = (value - mean) * (value - mean);
 		devaccu += squares[writepos];
 
-		if (added > 0) {
-			deviation = (float) sqrt ((double) (devaccu / added));
-		} else {
-			deviation = 0.0f;
-		}
+		// 5. Rekalkuler standardavvik.
+		deviation = (float) sqrt((double)(devaccu / added));
 
+		// 6. Oppdater skrivepeker.
 		writepos++;
 		if (writepos >= DEVIATION_NUMSAMPLES)
     		writepos = 0;
 	}
+
+	// Husk alltid den siste verdien for neste "edge detection".
+	last_value = value;
 }
 	
 void DEVIATIONOBJ::work(void)
 {	
 	pass_values(0, deviation);
 	pass_values(1, mean);
-	
 }
 
-// ENDRING: Implementerer den nye funksjonen
-void DEVIATIONOBJ::change_interval_seconds(int newinterval_seconds)
+void DEVIATIONOBJ::update_settings(int new_value, int new_mode)
 {
-	interval_seconds = newinterval_seconds;
+    mode = new_mode;
+    interval_setting = new_value;
 
-	// Beregn nytt intervall i samples basert på global TTY.samplingrate
-	if (TTY.samplingrate > 0) {
-		interval = interval_seconds * TTY.samplingrate;
-	} else {
-		interval = interval_seconds * 256; // Bruk en fornuftig standardverdi hvis TTY.samplingrate ikke er satt
-	}
+    if (mode == MODE_SECONDS_DEV) {
+        if (TTY.samplingrate > 0) {
+            interval = interval_setting * TTY.samplingrate;
+        } else {
+            interval = interval_setting * 256;
+        }
+    } else { // mode == MODE_EVENTS_DEV
+        interval = interval_setting;
+    }
 
-	// Sikkerhetssjekk for å unngå buffer overflow
-	if (interval >= DEVIATION_NUMSAMPLES) {
-		interval = DEVIATION_NUMSAMPLES - 1;
-	}
-	
-	// Reset kalkulasjonen
+    if (interval >= DEVIATION_NUMSAMPLES) {
+        interval = DEVIATION_NUMSAMPLES - 1;
+    }
+    if (interval < 1) {
+        interval = 1;
+    }
+
+	// Full nullstilling av tilstanden.
 	added = 0;
+    writepos = 0;
 	meanaccu = 0;
-	devaccu=0;
+	devaccu = 0;
+    mean = 0;
+    deviation = 0;
+    last_value = INVALID_VALUE;
 }
 
 DEVIATIONOBJ::~DEVIATIONOBJ() {}
+
+void UpdateDeviationDialogUI(HWND hDlg, DEVIATIONOBJ* st)
+{
+    SCROLLINFO lpsi;
+    lpsi.cbSize = sizeof(SCROLLINFO);
+    lpsi.fMask = SIF_RANGE | SIF_POS;
+
+    if (st->mode == MODE_SECONDS_DEV) {
+        SetDlgItemText(hDlg, IDC_INTERVAL_UNITS_LABEL_DEV, _T("seconds"));
+        lpsi.nMin = 1;
+        lpsi.nMax = 300;
+    } else { // mode == MODE_EVENTS_DEV
+        SetDlgItemText(hDlg, IDC_INTERVAL_UNITS_LABEL_DEV, _T("events"));
+        lpsi.nMin = 2; // Trenger minst 2 punkter for et meningsfylt standardavvik
+        lpsi.nMax = 1000; 
+    }
+    
+    lpsi.nPos = st->interval_setting;
+    SetScrollInfo(GetDlgItem(hDlg, IDC_DEVIATIONINTERVALBAR), SB_CTL, &lpsi, TRUE);
+    SetDlgItemInt(hDlg, IDC_DEVIATIONINTERVAL, st->interval_setting, FALSE);
+}

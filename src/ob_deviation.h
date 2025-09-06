@@ -21,6 +21,12 @@
 // 5 minutter ved 512Hz = 300s * 512Hz = 153600 samples. Vi runder opp.
 #define DEVIATION_NUMSAMPLES 160001
 
+// ENDRING: Lagt til en enum for å gjøre modusen mer lesbar.
+enum DeviationMode {
+    MODE_SECONDS_DEV,
+    MODE_EVENTS_DEV
+};
+
 class DEVIATIONOBJ : public BASE_CL
 {
 	protected:
@@ -29,10 +35,14 @@ class DEVIATIONOBJ : public BASE_CL
 		float squares[DEVIATION_NUMSAMPLES];
 		float mean,deviation;
         int writepos, added;
+        // ENDRING: Ny variabel for å oppdage "kanten" av en ny hendelse.
+        float last_value;
 
 	public:
-		int interval; // Dette vil nå være antall SAMPLES, kalkulert fra interval_seconds
-		int interval_seconds; // ENDRING: Ny variabel for å holde på intervallet i sekunder
+		int interval; // Den kalkulerte verdien (i samples eller antall)
+        // ENDRING: Nye variabler for å håndtere de to modusene.
+        int mode;
+		int interval_setting;
 
 	DEVIATIONOBJ(int num);
 
@@ -46,12 +56,11 @@ class DEVIATIONOBJ : public BASE_CL
 	
 	void work(void);
 
-    // ENDRING: Endret funksjonen til å ta imot sekunder
-	void change_interval_seconds(int newinterval_seconds);
+    // ENDRING: En ny, mer generell funksjon for å oppdatere innstillingene.
+	void update_settings(int new_value, int new_mode);
 
 	~DEVIATIONOBJ();
 
-	friend LRESULT CALLBACK DEVIATIONDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+	friend LRESULT CALLBACK DeviationDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
        
-    
 };

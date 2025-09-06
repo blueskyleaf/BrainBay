@@ -31,7 +31,9 @@ class AVERAGEOBJ : public BASE_CL
 		float samples[AVERAGE_NUMSAMPLES];
         long interval; // Dette er den *kalkulerte* verdien (i samples eller antall)
         long writepos, added;
-
+        // ENDRING: Ny variabel for å oppdage "kanten" av en ny hendelse.
+        float last_value; 
+		
 	public:
         // ENDRING: Nye variabler for å håndtere de to modusene.
         int mode;               // Vil lagre enten MODE_SECONDS eller MODE_EVENTS.
