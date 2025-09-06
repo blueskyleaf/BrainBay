@@ -1001,6 +1001,8 @@
 #define IDC_RADIO_SECONDS_DEV           1104
 #define IDC_RADIO_EVENTS_DEV            1105
 #define IDC_INTERVAL_UNITS_LABEL_DEV    1106
+#define IDC_PRESET_COMBO                1107
+#define IDC_EVAL_TITLE                  1108
 
 // Next default values for new objects
 // 

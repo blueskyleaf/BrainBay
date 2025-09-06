@@ -55,6 +55,7 @@ GNU General Public License for more details.
 #include "brainBay.h"
 #include "ob_evaluator.h"
 #include "matheval.h"
+#include <tchar.h> // Inkluder for _T()
 
 #if _MSC_VER < 1900
   #pragma comment(lib, "matheval_v100.lib")
@@ -191,6 +192,21 @@ EVALOBJ::~EVALOBJ()
     if (expression != NULL) delete expression;
 }
 
+struct Preset {
+    const char* long_name;  // For menyen
+    const char* short_name; // For blokkens tittel
+    const char* formula;    // For kalkulasjonen
+};
+
+static const Preset presets[] = {
+    { "Frequency (Hz) -> Milliseconds (ms)", "Hz -> ms", "1000/A" },
+    { "Frequency (Hz) -> Beats Per Minute (BPM)", "Hz -> BPM", "A*60" },
+    { "Beats Per Minute (BPM) -> Seconds per beat", "BPM -> s/beat", "60/A" },
+    { "Amplitude -> Power (uV^2)", "Amp -> Power", "A^2" },
+    { "Power -> Decibels (dB)", "Power -> dB", "10*log(A)" }
+};
+static const int num_presets = sizeof(presets) / sizeof(presets[0]);
+
 LRESULT CALLBACK EvalDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static bool init;
@@ -202,10 +218,22 @@ LRESULT CALLBACK EvalDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	switch( message )
 	{
 		case WM_INITDIALOG:
+        {
 	        init = true;
 	        if (st->expression != NULL)
-		        SetDlgItemText(hDlg, IDC_EVALEXPRESSION, st->expression);
+		        SetDlgItemTextA(hDlg, IDC_EVALEXPRESSION, st->expression);
+            SetDlgItemTextA(hDlg, IDC_EVAL_TITLE, st->tag);
+
+            HWND hCombo = GetDlgItem(hDlg, IDC_PRESET_COMBO);
+            SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)"--- Select a common formula ---");
+            for (int i = 0; i < num_presets; i++) {
+                SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)presets[i].long_name);
+            }
+            SendMessage(hCombo, CB_SETCURSEL, 0, 0);
+
             init = false;
+            return TRUE;
+        }
 		case WM_CLOSE:
 			    EndDialog(hDlg, LOWORD(wParam));
 				return TRUE;
@@ -214,13 +242,55 @@ LRESULT CALLBACK EvalDlgHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			switch (LOWORD(wParam)) 
 			{
 				case IDC_EVALAPPLY:
+                {
                 	char strExpr[MAXEXPRLENGTH+1];
-                	GetDlgItemText(hDlg, IDC_EVALEXPRESSION, strExpr, MAXEXPRLENGTH);
+                    char strTitle[16];
+
+                	GetDlgItemTextA(hDlg, IDC_EVALEXPRESSION, strExpr, MAXEXPRLENGTH);
+                    GetDlgItemTextA(hDlg, IDC_EVAL_TITLE, strTitle, 15);
+
                     st->setExpression(strExpr);
-					strncpy(st->tag, st->expression,12);
-					st->tag[12]='.';st->tag[13]='.';st->tag[14]=0;
+					strncpy(st->tag, strTitle, 14);
+					st->tag[14]=0;
+
 					InvalidateRect(ghWndDesign,NULL,TRUE);
+
+                    // ENDRING: Deaktiver knappen etter at endringene er lagret.
+                    EnableWindow(GetDlgItem(hDlg, IDC_EVALAPPLY), FALSE);
                     break;
+                }
+
+                case IDC_PRESET_COMBO:
+                {
+                    if (HIWORD(wParam) == CBN_SELCHANGE)
+                    {
+                        HWND hCombo = GetDlgItem(hDlg, IDC_PRESET_COMBO);
+                        int index = SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+                        
+                        if (index > 0 && index <= num_presets)
+                        {
+                            const Preset& selected_preset = presets[index - 1];
+
+                            SetDlgItemTextA(hDlg, IDC_EVAL_TITLE, selected_preset.short_name);
+                            SetDlgItemTextA(hDlg, IDC_EVALEXPRESSION, selected_preset.formula);
+                            
+                            SendMessage(hDlg, WM_COMMAND, MAKEWPARAM(IDC_EVALAPPLY, 0), 0);
+                        }
+                    }
+                    break;
+                }
+
+                // ENDRING: Ny logikk for å re-aktivere knappen ved manuell redigering.
+                case IDC_EVAL_TITLE:
+                case IDC_EVALEXPRESSION:
+                {
+                    if (HIWORD(wParam) == EN_CHANGE)
+                    {
+                        // Hvis brukeren skriver i et av feltene, aktiver "Apply"-knappen.
+                        EnableWindow(GetDlgItem(hDlg, IDC_EVALAPPLY), TRUE);
+                    }
+                    break;
+                }
             }
 			return TRUE;
 			break;
