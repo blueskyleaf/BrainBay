@@ -376,6 +376,7 @@ static HMODULE InitNeurobitDrvLib(char * drvLibName)
 		!(NdCloseDevContext = (TCloseDevContext) GetProcAddress(drv_lib, "NdCloseDevContext")) ||
 		!(NdGetDevConfig = (TGetDevConfig) GetProcAddress(drv_lib, "NdGetDevConfig")) ||
 		!(NdSetDevConfig = (TSetDevConfig) GetProcAddress(drv_lib, "NdSetDevConfig")) ||
+		!(NdChangeDevice = (TChangeDevice) GetProcAddress(drv_lib, "NdChangeDevice")) ||
 
 		!(NdGetDevName = (TGetDevName) GetProcAddress(drv_lib, "NdGetDevName")) ||
 		!(NdEnumParams = (TEnumParams) GetProcAddress(drv_lib, "NdEnumParams")) ||
@@ -397,9 +398,6 @@ static HMODULE InitNeurobitDrvLib(char * drvLibName)
 		report_error("Cannot find library function");
 		return NULL;
 	}
-	
-	NdChangeDevice = (TChangeDevice) GetProcAddress(drv_lib, "NdChangeDevice");
-	
 	*pUserMsg = NdUserMsg;
 	*pUserInd = NdUserInd;
 	*pProcSamples = NdProcSamples;
@@ -478,26 +476,18 @@ LRESULT CALLBACK OPTIMADlgHandler( HWND hDlg, UINT message, WPARAM wParam, LPARA
 					if (HIWORD(wParam)==CBN_SELCHANGE)
 					{   int sel;
 					    sel=SendDlgItemMessage(hDlg, IDC_NB_DEVICECOMBO, CB_GETCURSEL, 0, 0 );
-
 						setDefaultNeurobitDevice(st, DevTab[sel]);
 
-						int r = 0;
-						if (NdChangeDevice) {
-							r = NdChangeDevice(st->device);
-							if (r == 0) { 
-								report_error("Could not apply device settings... using default settings");
-								if (DevCtx >= 0) NdCloseDevContext(DevCtx);
-								DevCtx = NdOpenDevContext(st->device);
-							} else if (r < 0) {
-								report("Default settings have been applied for your Neurobit device - please check...");
-							}
-						} else {
-							// Eldre driver: ikke støtte for NdChangeDevice → bruk gammel sti
-							if (DevCtx >= 0) NdCloseDevContext(DevCtx);
-							DevCtx = NdOpenDevContext(st->device);
+						int r=NdChangeDevice(st->device);
+						if (r==0) { 
+							report_error("Could not apply device settings... using default settings");
+						    if (DevCtx>=0) NdCloseDevContext(DevCtx);
+						    DevCtx=NdOpenDevContext(st->device);
+						} 
+						else if (r<0) {
+							report("Default settings have been applied for your Neurobit device - please check settings...");
 						}
-
-						st->update_channelinfo();
+				        st->update_channelinfo();
 						//InvalidateRect(hDlg,NULL,FALSE);
 					}
 					break;
